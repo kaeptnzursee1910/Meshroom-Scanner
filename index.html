@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Meshroom-Scanner</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Startbildschirm -->
+  <section id="intro" class="screen active">
+    <div class="intro-inner">
+      <img src="icons/icon.svg" alt="" class="logo">
+      <h1>Meshroom-Scanner</h1>
+      <p class="lead">Fotografiert ein Objekt automatisch aus allen Richtungen – fertig für die 3D-Rekonstruktion in Meshroom.</p>
+      <ol class="steps">
+        <li>Objekt frei und gut beleuchtet hinstellen, matter Untergrund mit etwas Struktur.</li>
+        <li><b>Umrunden:</b> Langsam im Kreis um das Objekt gehen, Kamera aufs Objekt gerichtet. Die App löst automatisch aus, sobald ein neuer Blickwinkel erreicht und das Bild scharf ist.</li>
+        <li>Drei Runden in verschiedenen Höhen: tief, schräg von oben, steil von oben.</li>
+        <li>Fotos als ZIP exportieren, entpacken und den Ordner in Meshroom ziehen.</li>
+      </ol>
+      <button id="btn-start" class="primary big">Scanner starten</button>
+      <button id="btn-intro-gallery" class="ghost">Gespeicherte Fotos (<span id="intro-count">0</span>)</button>
+      <p id="intro-error" class="error" hidden></p>
+      <p class="small">Kamera und Lagesensoren werden nur lokal verwendet. Die Fotos verlassen das Handy erst beim Export.</p>
+    </div>
+  </section>
+
+  <!-- Scanner -->
+  <section id="scan" class="screen">
+    <video id="video" playsinline muted autoplay></video>
+    <div id="flash"></div>
+    <div class="reticle"></div>
+
+    <header class="topbar">
+      <div class="pill" id="count-pill"><b id="count">0</b> Fotos</div>
+      <div class="pill" id="ring-pill">Ring: <b id="ring-name">–</b></div>
+      <button class="icon" id="btn-help" aria-label="Hilfe">?</button>
+      <button class="icon" id="btn-settings" aria-label="Einstellungen">⚙</button>
+    </header>
+
+    <div class="meters">
+      <div class="meter"><span>Schärfe</span><div class="bar"><i id="m-sharp"></i></div></div>
+      <div class="meter"><span>Ruhe</span><div class="bar"><i id="m-steady"></i></div></div>
+      <div class="meter"><span>Licht</span><div class="bar"><i id="m-light"></i></div></div>
+    </div>
+
+    <div id="status" class="status">Bereit</div>
+
+    <canvas id="coverage" width="240" height="240" aria-label="Abdeckung"></canvas>
+
+    <footer class="bottombar">
+      <div class="modes" role="tablist">
+        <button class="mode active" data-mode="orbit" role="tab">Umrunden</button>
+        <button class="mode" data-mode="turntable" role="tab">Drehteller</button>
+      </div>
+      <div class="controls">
+        <button class="icon round" id="btn-gallery" aria-label="Galerie"><img id="last-thumb" alt=""><span>▦</span></button>
+        <button class="icon round" id="btn-lock" aria-label="Fokus/Belichtung sperren">AE/AF</button>
+        <button id="btn-shutter" class="shutter" aria-label="Foto aufnehmen"></button>
+        <button id="btn-auto" class="icon round auto" aria-label="Automatik ein/aus">AUTO</button>
+        <button class="icon round" id="btn-torch" aria-label="Licht">☀</button>
+      </div>
+    </footer>
+  </section>
+
+  <!-- Galerie -->
+  <section id="gallery" class="screen">
+    <header class="sheet-head">
+      <button class="ghost" id="btn-gallery-back">‹ Zurück</button>
+      <h2>Fotos <small id="gallery-info"></small></h2>
+    </header>
+    <div id="ring-summary" class="ring-summary"></div>
+    <div id="grid" class="grid"></div>
+    <footer class="sheet-foot">
+      <button class="danger" id="btn-clear">Alle löschen</button>
+      <button class="primary" id="btn-export">ZIP exportieren</button>
+    </footer>
+    <div id="export-result" class="export-result" hidden>
+      <p id="export-text"></p>
+      <a id="export-download" class="primary button" download>Herunterladen</a>
+      <button id="export-share" class="ghost" hidden>Teilen …</button>
+      <button id="export-close" class="ghost">Schließen</button>
+    </div>
+  </section>
+
+  <!-- Einstellungen -->
+  <dialog id="settings" class="sheet">
+    <form method="dialog">
+      <h2>Einstellungen</h2>
+      <label>Winkelabstand pro Foto <output data-for="step"></output>
+        <input type="range" name="step" min="8" max="30" step="1"></label>
+      <p class="hint">10–15° ergeben 24–36 Fotos pro Ring und ausreichend Überlappung (60–80 %).</p>
+
+      <label>Schärfe-Anspruch <output data-for="strictness"></output>
+        <input type="range" name="strictness" min="0.3" max="0.95" step="0.05"></label>
+
+      <label>Max. Drehbewegung beim Auslösen <output data-for="maxRotation"></output>
+        <input type="range" name="maxRotation" min="5" max="60" step="5"></label>
+
+      <fieldset>
+        <legend>Drehteller-Modus</legend>
+        <label>Intervall <output data-for="interval"></output>
+          <input type="range" name="interval" min="0.5" max="6" step="0.5"></label>
+        <label>Fotos pro Umdrehung <output data-for="perRing"></output>
+          <input type="range" name="perRing" min="12" max="72" step="2"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Bildqualität</legend>
+        <label>Videoauflösung
+          <select name="resolution">
+            <option value="max">Maximum</option>
+            <option value="high">Hoch (≈5 MP)</option>
+            <option value="medium">Mittel (≈2,7 MP)</option>
+          </select></label>
+        <label class="check"><input type="checkbox" name="usePhotoApi"> Foto-API nutzen (volle Sensorauflösung, langsamer, nicht auf allen Geräten)</label>
+        <label>Brennweite (35-mm-äquivalent) <output data-for="focal35"></output>
+          <input type="range" name="focal35" min="13" max="80" step="1"></label>
+        <p class="hint">Wird ins EXIF geschrieben, damit Meshroom die Kamera kennt. Hauptkamera der meisten Handys: 24–28 mm.</p>
+      </fieldset>
+
+      <label class="check"><input type="checkbox" name="vibrate"> Vibration beim Auslösen</label>
+
+      <div class="row">
+        <button type="button" class="ghost" id="btn-reset-coverage">Abdeckung zurücksetzen</button>
+        <button value="ok" class="primary">Fertig</button>
+      </div>
+      <p class="small" id="device-info"></p>
+    </form>
+  </dialog>
+
+  <!-- Hilfe -->
+  <dialog id="help" class="sheet">
+    <form method="dialog">
+      <h2>Tipps für gute Meshroom-Scans</h2>
+      <ul class="tips">
+        <li><b>Licht:</b> gleichmäßig und diffus (bewölkter Himmel, Schatten). Keine harten Schatten, kein Blitz.</li>
+        <li><b>AE/AF sperren:</b> Vor dem Start einmal aufs Objekt richten und sperren – dann bleiben Helligkeit und Fokus über alle Fotos gleich.</li>
+        <li><b>Oberflächen:</b> Glänzende, durchsichtige oder einfarbige Objekte funktionieren schlecht. Ggf. mit Kreidespray/Puder mattieren.</li>
+        <li><b>Abstand:</b> Objekt füllt ca. 60–80 % des Bildes, Abstand während einer Runde möglichst gleich lassen.</li>
+        <li><b>Umrunden-Modus:</b> Nicht das Handy drehen, sondern um das Objekt <i>herumgehen</i>. Die Ringanzeige zeigt, welche Winkel fehlen. Die Höhe (Ring) wird automatisch über die Neigung erkannt.</li>
+        <li><b>Drehteller-Modus:</b> Handy auf Stativ, Objekt auf Drehteller. Die App löst im Takt aus; zwischen zwei Fotos ein Stück weiterdrehen. Hintergrund neutral halten.</li>
+        <li><b>Anzahl:</b> 50–200 Fotos sind ideal. Mehr kostet in Meshroom nur Rechenzeit.</li>
+        <li><b>Meshroom:</b> ZIP entpacken, Ordner ins Fenster „Images“ ziehen, <i>Start</i> klicken. Ergebnis liegt im Knoten „Texturing“.</li>
+      </ul>
+      <div class="row"><button value="ok" class="primary">Verstanden</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
